@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TacSpace</title>
+    <link rel="stylesheet" 
+    href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" 
+    integrity="sha512-SnH5WK+bZxgPHs44uWIX+LLJAJ9/2PkPKZ5QiAj6Ta86w+fsb2TkcmfRyVX3pBnMFcV7oQPJkl9QevSCWr3W6A==" 
+    crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <style>
+        body { margin: 0; 
+            padding-bottom: 3rem; 
+            font-family: -apple-system, BlinkMacSystemFont, 
+            "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #333;
+        }
+        #form { 
+            background: rgba(0, 0, 0, 0.15); 
+            padding: 0.25rem; 
+            position: fixed; 
+            bottom: 0; 
+            left: 0; 
+            right: 0; 
+            display: flex; 
+            height: 3rem; 
+            box-sizing: border-box; 
+            backdrop-filter: blur(10px); 
+        }
+        #input { 
+            border: none; 
+            padding: 0 1rem; 
+            flex-grow: 1; 
+            border-radius: 2rem; 
+            margin: 0.25rem; 
+        }
+        #input:focus { 
+            outline: none; 
+        }
+        #form > button { 
+            background: #333; 
+            border: none; 
+            padding: 0 1rem; 
+            margin: 0.25rem; 
+            border-radius: 3px; 
+            outline: none; 
+            color: #fff; }
+
+        #messages { 
+            list-style-type: none; 
+            margin: 0; 
+            padding: 0; 
+        }
+        #messages > li { 
+            padding: 0.5rem 1rem; 
+        }
+        #messages > li:nth-child(odd) { 
+            background: #e4e4e4; 
+            max-width: 50vh;
+            border-radius: 10px;
+        }
+        #images_container {
+            max-width: 300px;
+            padding: 10px;
+        }
+        #typing {
+            padding: 0.5rem 1rem;
+            color: grey;
+        }
+        #online-users {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            margin: 0;
+            padding: 0.5rem 1rem;
+            color: green;
+            background: rgba(194, 194, 194, 0.5);
+            border-radius: 5px;
+        }
+        .user-item {
+            cursor: pointer;
+        }
+        .image-container {
+            margin-bottom: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            overflow: hidden;
+            max-width: 30vw;
+            max-height: 40vw;
+        }
+        .image-container img {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+        #mini-profile {
+            display: none;
+            position: fixed;
+            bottom: 80px;
+            right: 10px;
+            padding: 0.5rem 1rem;
+            background: rgba(255, 255, 255, 0.8);
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);;
+        }
+        #private-form {
+            position: fixed;
+            width: 70%;
+            margin-left: 10%;
+            justify-content: center;
+            bottom: 3rem;
+            display: none;
+            flex-direction: column;
+            background: rgba(69, 67, 67, 0.8);
+            border-radius: 5px;
+            padding: 0.5rem 1rem;
+            z-index: 1000;
+        }
+        #recipient, #private-input {
+            margin-bottom: 5px;
+            padding: 5px;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body>
+    <ul id="messages">
+        <div id="images-container"></div>
+    </ul>
+    <div id="typing"></div>
+    <div id="online-users"></div>
+    <div id="mini-profile">
+        <div id="profile-nickname"></div>
+        <button id="direct-message">DM</button>
+    </div>
+    <form id="form" action="" enctype="multipart/form-data">
+        <input type="hidden" id="recipient">
+        <input id="input" autocomplete="off"><input type="file" id="file-input">
+        <button id="send-file-button">Send File</button>
+        <button>Send</button>
+    </form>
+    <form id="private-form" action="">
+        
+        <input id="private-input" autocomplete="off" placeholder="Private message"><button>Send Msg</button>
+    </form>
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        var socket = io();
+
+        var form = document.getElementById('form');
+        var input = document.getElementById('input');
+        var fileInput = document.getElementById('file-input');
+        var sendFileButton = document.getElementById('send-file-button');
+        var privateForm = document.getElementById('private-form');
+        var recipient = document.getElementById('recipient');
+        var privateInput = document.getElementById('private-input');
+        var messages = document.getElementById('messages');
+        var typing = document.getElementById('typing');
+        var onlineUsers = document.getElementById('online-users');
+        var miniProfile = document.getElementById('mini-profile');
+        var profileNickname = document.getElementById('profile-nickname');
+        var directMessageBtn = document.getElementById('direct-message');
+        var nickname = prompt("Enter your nickname:");
+
+        var typingUsers = new Set();
+
+        socket.emit('nickname', nickname);
+
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+
+            const file = fileInput.files[0];
+
+            if (input.value) {
+                socket.emit('chat message', input.value);
+                input.value = '';
+                socket.emit('stop typing');
+            }
+
+            if (file) {
+                const reader = new FileReader();
+                reader.readAsArrayBuffer(file);
+                reader.onload = function(event) {
+                    const fileData = event.target.result;
+                    const fileInfo = {
+                        name: file.name,
+                        type: file.type,
+                        size: file.size,
+                        data: Array.from(new Uint8Array(fileData))
+                    };
+                    socket.emit('file', fileInfo);
+                    fileInput.value = '';
+                }
+            }
+
+        });
+
+        socket.on('file', function(fileInfo) {
+            console.log('Received file:', fileInfo);
+
+            if (fileInfo.type && fileInfo.type.startsWith('image/')) {
+                var item = document.createElement('li');
+                var messageDiv = document.createElement('div');
+                var nicknameSpan = document.createElement('span');
+                var imgContainer = document.createElement('div');
+                var img = document.createElement('img');
+
+                nicknameSpan.textContent = fileInfo.nickname + ': ';
+                nicknameSpan.style.fontWeight = 'bold';
+
+                
+                img.src = fileInfo.url;
+                img.style.maxWidth = '100%';
+
+                imgContainer.classList.add('image-container');
+                imgContainer.appendChild(img);
+
+                messageDiv.appendChild(nicknameSpan);
+                messageDiv.appendChild(document.createElement('br'))
+                messageDiv.appendChild(imgContainer);
+                item.appendChild(messageDiv);
+
+                messages.appendChild(item);
+                window.scrollTo(0, document.body.scrollHeight);
+                
+            } else if (fileInfo.type) {
+                const link = document.createElement('a');
+                link.href = 'data:' + fileInfo.type + ';base64,' + btoa(String.fromCharCode.apply(null, fileInfo.data));
+                link.textContent = fileInfo.name;
+                link.download = fileInfo.name;
+                messages.appendChild(link);
+            } else {
+                console.error('Received file does not have a valid type:', fileInfo);
+            }
+        });
+
+        sendFileButton.addEventListener('click', function() {
+            const file = fileInput.files[0];
+            if (file) {
+                const formData = new FormData();
+                formData.append('file', file);
+
+                fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.url) {
+                        socket.emit('file', { url: data.url, nickname: nickname });
+                    }
+                })
+                .catch(erro => console.error('Error uploading file:', error));
+            }
+        });
+
+        input.addEventListener('input', function() {
+            if (input.value) {
+                socket.emit('typing', nickname);
+            } else {
+                socket.emit('stop typing');
+            }
+        });
+
+        privateForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            if (recipient.value && privateInput.value) {
+                socket.emit('private message', {recipientNickname: recipient.value, 
+                    msg: privateInput.value});
+                privateInput.value = '';
+                privateForm.style.display = 'none';
+            }
+        });
+
+        directMessageBtn.addEventListener('click', function() {
+            privateForm.style.display = 'flex';
+            miniProfile.style.display = 'none';
+            privateForm.style.zIndex = 1000;
+            window.scrollTo(0, document.body.scrollHeight);
+        });
+
+        socket.on('chat message', function(msg) {
+            var item = document.createElement('li');
+            var messageDiv = document.createElement('div');
+            var messageContent = document.createElement('span');
+            var nicknameSpan = document.createElement('span');
+
+            nicknameSpan.textContent = msg.nickname + ': ';
+            nicknameSpan.style.fontWeight = 'bold';
+
+            messageContent.textContent = msg.message;
+
+            messageDiv.appendChild(nicknameSpan);
+            messageDiv.appendChild(document.createElement('br'));
+            messageDiv.appendChild(messageContent);
+
+            item.appendChild(messageDiv);
+
+            messages.appendChild(item);
+            window.scrollTo(0, document.body.scrollHeight);
+        });
+
+        socket.on('private message', function({ sender, msg }) {
+            var item = document.createElement('li');
+            item.textContent = `Private from ${sender}: ${msg}`;
+            item.style.color = 'red';
+            messages.appendChild(item);
+            window.scrollTo(0, document.body.scrollHeight);
+        })
+
+        socket.on('typing', function(user) {
+            typingUsers.add(user);
+            updateTypingMessage();
+        });
+
+        socket.on('stop typing', function() {
+            typingUsers.delete(user);
+            updateTypingMessage();
+        });
+
+        function updateTypingMessage() {
+            if (typingUsers.size === 0) {
+                typing.textContent = '';
+            } else if (typingUsers.size === 1) {
+                typing.textContent = `${Array.from(typingUsers)[0]} is typing...`;
+            } else if (typingUsers.size === 2) {
+                typing.textContent = `${Array.from(typingUsers)[0]} and ${Array.from(typingUsers)[1]} are typing...`;
+            } else if (typingUsers.size === 3) {
+                typing.textContent = `${Array.from(typingUsers)[0]}, ${Array.from(typingUsers)[1]}, and ${Array.from(typingUsers)[2]} are typing...`
+            } else {
+                typing.textContent = 'Multiple people are typing...';
+            }
+        }
+
+        socket.on('online users', function(users) {
+            onlineUsers.innerHTML = '';
+            onlineUsers.innerHTML = 'Online Users:<br>';
+
+            if (users.length > 0) {
+                users.forEach(user => {
+                    const userItem = document.createElement('div');
+                    userItem.textContent = user;
+                    userItem.classList.add('user-item');
+                    userItem.addEventListener('click', function() {
+                        recipient.value = user;
+                        profileNickname.textContent = user;
+                        miniProfile.style.display = 'block';
+                    });
+                    onlineUsers.appendChild(userItem);
+                });
+            }
+        });
+
+        socket.on('connect', () => {
+            console.log('connected to server');
+            io.emit('chat message', { nickname: 'Server', message: `${nickname} has connected` })
+        });
+        socket.on('disconnect', () => {
+            console.log('disconnected from server');
+            io.emit('chat message', { nickname: 'Server', message: `${nickname} has disconnected` })
+        })
+    </script>
+</body>
+</html>
